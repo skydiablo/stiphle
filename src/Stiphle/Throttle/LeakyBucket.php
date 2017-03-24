@@ -3,6 +3,7 @@
  * @package    Stiphle
  * @subpackage Stiphle\Throttle
  */
+
 namespace Stiphle\Throttle;
 
 use Stiphle\Throttle\ThrottleInterface;
@@ -42,8 +43,8 @@ class LeakyBucket implements ThrottleInterface
     /**
      * Throttle
      *
-     * @param string $key  - A unique key for what we're throttling
-     * @param int $limit   - How many are allowed
+     * @param string $key - A unique key for what we're throttling
+     * @param int $limit - How many are allowed
      * @param int $milliseconds - In this many milliseconds
      * @return int
      */
@@ -52,23 +53,26 @@ class LeakyBucket implements ThrottleInterface
         /**
          * Try and do our waiting without a lock
          */
-        $key = $this->getStorageKey($key, $limit, $milliseconds); 
-        $wait     = 0;
+        $key = $this->getStorageKey($key, $limit, $milliseconds);
+        $wait = 0;
         $newRatio = $this->getNewRatio($key, $limit, $milliseconds);
 
         if ($newRatio > $milliseconds) {
             $wait = ceil($newRatio - $milliseconds);
+            usleep($wait);
         }
-        usleep($wait * 1000);
 
         /**
-         * Lock, record and release 
+         * Lock, record and release
          */
         $this->storage->lock($key);
-        $newRatio = $this->getNewRatio($key, $limit, $milliseconds);
-        $this->setLastRatio($key, $newRatio);
-        $this->setLastRequest($key, microtime(1));
-        $this->storage->unlock($key);
+        try {
+            $newRatio = $this->getNewRatio($key, $limit, $milliseconds);
+            $this->setLastRatio($key, $newRatio);
+            $this->setLastRequest($key, microtime(true));
+        } finally {
+            $this->storage->unlock($key);
+        }
         return $wait;
     }
 
@@ -77,17 +81,17 @@ class LeakyBucket implements ThrottleInterface
      *
      * How long would I have to wait to make a request?
      *
-     * @param string $key  - A unique key for what we're throttling
-     * @param int $limit   - How many are allowed
+     * @param string $key - A unique key for what we're throttling
+     * @param int $limit - How many are allowed
      * @param int $milliseconds - In this many milliseconds
      * @return int - the number of milliseconds before this request should be allowed
      * to pass
      */
     public function getEstimate($key, $limit, $milliseconds)
     {
-        $key = $this->getStorageKey($key, $limit, $milliseconds); 
+        $key = $this->getStorageKey($key, $limit, $milliseconds);
         $newRatio = $this->getNewRatio($key, $limit, $milliseconds);
-        $wait     = 0;
+        $wait = 0;
         if ($newRatio > $milliseconds) {
             $wait = ceil($newRatio - $milliseconds);
         }
@@ -100,21 +104,21 @@ class LeakyBucket implements ThrottleInterface
      * Assuming we're making a request, get the ratio of requests made to
      * requests allowed
      *
-     * @param string $key  - A unique key for what we're throttling
-     * @param int $limit   - How many are allowed
+     * @param string $key - A unique key for what we're throttling
+     * @param int $limit - How many are allowed
      * @param int $milliseconds - In this many milliseconds
      * @return float
      */
     protected function getNewRatio($key, $limit, $milliseconds)
     {
         $lastRequest = $this->getLastRequest($key) ?: 0;
-        $lastRatio   = $this->getLastRatio($key) ?: 0;
+        $lastRatio = $this->getLastRatio($key) ?: 0;
 
-        $diff = (microtime(1) - $lastRequest) * 1000;
+        $diff = (microtime(true) - $lastRequest) * 1000;
 
         $newRatio = $lastRatio - $diff;
         $newRatio = $newRatio < 0 ? 0 : $newRatio;
-        $newRatio+= $milliseconds/$limit;
+        $newRatio += $milliseconds / $limit;
 
         return $newRatio;
     }
@@ -122,14 +126,14 @@ class LeakyBucket implements ThrottleInterface
     /**
      * Get storage key
      *
-     * @param string $key  - A unique key for what we're throttling
-     * @param int $limit   - How many are allowed
+     * @param string $key - A unique key for what we're throttling
+     * @param int $limit - How many are allowed
      * @param int $milliseconds - In this many milliseconds
      * @return string
      */
     protected function getStorageKey($key, $limit, $milliseconds)
     {
-        return $key . '::' . $limit . '::' . $milliseconds; 
+        return $key . '::' . $limit . '::' . $milliseconds;
     }
 
     /**
